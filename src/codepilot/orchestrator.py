@@ -227,8 +227,10 @@ class Orchestrator:
             )
             task.current_diff_path = code_res.payload.get("proposed_diff_path", "")
             task.test_output = code_res.payload.get("output", "")
-            task.modified_files = code_res.payload.get("modified_files", []) or task.relevant_files[:3]
+            task.modified_files = code_res.payload.get("modified_files", []) or []
             task.decision_log.append(code_res.message)
+            if not task.modified_files:
+                task.decision_log.append("No code changes generated; skipping promote/commit")
 
             task.state = TaskState.TESTING
             test_res = self.tester.run(self.settings.sandbox_root)
