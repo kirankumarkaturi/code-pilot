@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
+from typing import Iterable
 
 
 SUPPORTED_SUFFIXES = {".py", ".md", ".txt", ".json", ".yml", ".yaml", ".toml", ".ts", ".js"}
@@ -16,8 +19,126 @@ IGNORED_DIR_NAMES = {
 }
 
 
+def _estimate_tokens(text: str) -> int:
+    # Lightweight approximation keeps token accounting cheap and deterministic.
+    return max(1, len(text.split()))
+
+
+def _run_git(repo_root: Path, args: list[str]) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return (result.stdout or "").strip()
+
+
+def _git_signature(repo_root: Path) -> str:
+    head = _run_git(repo_root, ["rev-parse", "HEAD"])
+    # Includes tracked + untracked changes for cache invalidation.
+    status = _run_git(repo_root, ["status", "--porcelain"])
+    return f"{head}\n{status}".strip()
+
+
+def _cache_path(repo_root: Path) -> Path:
+    cache_dir = repo_root / ".codepilot"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / "repo_map_cache.json"
+
+
+def _load_cached_map(repo_root: Path, signature: str, token_budget: int) -> list[dict[str, str]] | None:
+    path = _cache_path(repo_root)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if payload.get("signature") != signature:
+        return None
+    if int(payload.get("token_budget", 0)) != token_budget:
+        return None
+
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return None
+    return items
+
+
+def _write_cached_map(repo_root: Path, signature: str, token_budget: int, items: list[dict[str, str]]) -> None:
+    payload = {
+        "signature": signature,
+        "token_budget": token_budget,
+        "items": items,
+    }
+    _cache_path(repo_root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _iter_exported_symbols(lines: Iterable[str], suffix: str) -> list[str]:
+    symbols: list[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+        if suffix == ".py":
+            if line.startswith("def ") or line.startswith("class "):
+                name = line.split("(", 1)[0].replace("def ", "").replace("class ", "").replace(":", "").strip()
+                if name:
+                    symbols.append(name)
+        elif suffix in {".ts", ".js"}:
+            if line.startswith("export ") or line.startswith("function ") or line.startswith("class "):
+                symbols.append(line.split("{", 1)[0].strip())
+        if len(symbols) >= 4:
+            break
+    return symbols
+
+
+def _first_description_line(lines: Iterable[str]) -> str:
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(("#", "//", "\"\"\"", "'''")):
+            return line[:120]
+        if line.startswith(("import ", "from ")):
+            continue
+        return line[:120]
+    return ""
+
+
+def _summarize_file(path: Path, rel: str) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except Exception:
+        lines = []
+
+    symbols = _iter_exported_symbols(lines, path.suffix)
+    desc = _first_description_line(lines)
+    symbol_text = ", ".join(symbols) if symbols else "none"
+    summary = f"File {rel}; symbols: {symbol_text}; desc: {desc or 'n/a'}"
+    return {
+        "path": rel,
+        "summary": summary,
+        "language": path.suffix.lstrip("."),
+    }
+
+
 def build_repo_map(repo_root: str, token_budget: int = 4000) -> list[dict[str, str]]:
     root = Path(repo_root)
+    signature = _git_signature(root)
+    cached = _load_cached_map(root, signature, token_budget)
+    if cached is not None:
+        return cached
+
     items: list[dict[str, str]] = []
     used = 0
 
@@ -27,12 +148,14 @@ def build_repo_map(repo_root: str, token_budget: int = 4000) -> list[dict[str, s
         if any(part in IGNORED_DIR_NAMES for part in path.parts):
             continue
         rel = str(path.relative_to(root)).replace("\\", "/")
-        summary = f"File {rel}"
-        cost = len(summary.split())
+        item = _summarize_file(path, rel)
+        cost = _estimate_tokens(item["summary"])
         if used + cost > token_budget:
             break
-        items.append({"path": rel, "summary": summary, "language": path.suffix.lstrip(".")})
+        items.append(item)
         used += cost
+
+    _write_cached_map(root, signature, token_budget, items)
     return items
 
 

@@ -43,7 +43,10 @@ class Orchestrator:
             use_dry_run=settings.use_dry_run,
             max_complexity=settings.max_complexity,
         )
-        self.repo_explorer = RepoExplorerAgent()
+        self.repo_explorer = RepoExplorerAgent(
+            token_budget=settings.repo_map_token_budget,
+            top_k=settings.repo_map_top_k,
+        )
         self.coder = CoderAgent(
             azure_endpoint=settings.azure_openai_endpoint,
             azure_api_key=settings.azure_openai_api_key,

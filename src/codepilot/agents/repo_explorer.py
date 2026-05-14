@@ -5,12 +5,16 @@ from src.codepilot.utils.repo_map import build_repo_map, retrieve_relevant_files
 
 
 class RepoExplorerAgent:
+    def __init__(self, token_budget: int = 4000, top_k: int = 10) -> None:
+        self.token_budget = token_budget
+        self.top_k = top_k
+
     def run(self, repo_root: str, task_text: str) -> AgentResult:
-        repo_map = build_repo_map(repo_root)
-        relevant = retrieve_relevant_files(task_text, repo_map)
+        repo_map = build_repo_map(repo_root, token_budget=self.token_budget)
+        relevant = retrieve_relevant_files(task_text, repo_map, k=self.top_k)
         if not relevant:
             # Fallback to top files for empty or tiny repositories.
-            relevant = [item["path"] for item in repo_map[:10]]
+            relevant = [item["path"] for item in repo_map[: self.top_k]]
         return AgentResult(
             ok=True,
             message="Repo map built",
