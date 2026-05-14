@@ -11,6 +11,7 @@ class PullRequestDraft:
     title: str
     body: str
     labels: list[str]
+    reviewers: list[str]
 
 
 class PRAgent:
@@ -34,5 +35,6 @@ class PRAgent:
             title=title,
             body=body,
             labels=["codepilot-generated", "needs-review"],
+            reviewers=[issue.reporter] if issue.reporter else [],
         )
         return AgentResult(ok=True, message="PR draft created", payload={"pr_draft": asdict(draft)})

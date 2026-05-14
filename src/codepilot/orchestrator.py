@@ -294,6 +294,7 @@ class Orchestrator:
                             title=pr_draft.get("title", f"CodePilot fix #{issue.issue_id}"),
                             body=pr_draft.get("body", ""),
                             labels=pr_draft.get("labels", []),
+                            reviewers=pr_draft.get("reviewers", []),
                             draft=True,
                         )
                         if github_pr.ok:
@@ -327,6 +328,7 @@ class Orchestrator:
                         title=pr_draft.get("title", f"CodePilot fix #{issue.issue_id}"),
                         body=pr_draft.get("body", ""),
                         labels=pr_draft.get("labels", []),
+                        reviewers=pr_draft.get("reviewers", []),
                         draft=True,
                     )
                     if github_pr.ok:

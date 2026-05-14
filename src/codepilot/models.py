@@ -30,6 +30,7 @@ class Issue:
     body: str
     labels: list[str] = field(default_factory=list)
     assignee: str | None = None
+    reporter: str | None = None
 
 
 @dataclass
