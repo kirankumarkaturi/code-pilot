@@ -52,26 +52,35 @@ class GitHelper:
             # Using origin/<default> here can fail when working tree contains local edits.
             checkout = self._run("checkout", "-B", branch, check=False)
             if checkout.returncode != 0:
-                return False, f"Checkout failed: {checkout.stderr.strip()}"
+                details = (checkout.stderr or checkout.stdout or "unknown error").strip()
+                return False, f"Checkout failed: {details}"
 
             # Stage only the promoted files
             for f in files:
                 rel = f.replace("\\", "/")
                 self._run("add", rel)
 
-            # Check if there's anything to commit
-            status = self._run("status", "--porcelain")
-            if not status.stdout.strip():
-                return False, "Nothing to commit — files already match repo state"
+            # Check only staged changes to avoid false positives from untracked files.
+            staged = self._run("diff", "--cached", "--name-only", check=False)
+            if staged.returncode != 0:
+                details = (staged.stderr or staged.stdout or "unknown error").strip()
+                return False, f"Unable to inspect staged files: {details}"
+            if not staged.stdout.strip():
+                return False, "Nothing staged to commit for promoted files"
 
-            self._run("commit", "-m", commit_message)
+            commit = self._run("commit", "-m", commit_message, check=False)
+            if commit.returncode != 0:
+                details = (commit.stderr or commit.stdout or "unknown error").strip()
+                return False, f"Commit failed: {details}"
 
             # Push
             push = self._run("push", "-u", "origin", branch, "--force", check=False)
             if push.returncode != 0:
-                return False, f"Push failed: {push.stderr.strip()}"
+                details = (push.stderr or push.stdout or "unknown error").strip()
+                return False, f"Push failed: {details}"
 
             return True, f"Branch '{branch}' pushed to origin"
 
         except subprocess.CalledProcessError as exc:
-            return False, f"Git error: {exc.stderr.strip()}"
+            details = (exc.stderr or exc.stdout or str(exc) or "unknown error").strip()
+            return False, f"Git error: {details}"
