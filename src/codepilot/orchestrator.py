@@ -351,9 +351,14 @@ class Orchestrator:
                     else:
                         task.decision_log.append(f"PR creation failed: {github_pr.message}")
 
-            if pr_url:
-                task.state = TaskState.PR_OPENED
-            elif pr_res.ok:
+            pipeline_succeeded = bool(git_pushed and pr_url)
+            if pipeline_succeeded:
+                task.state = TaskState.DONE
+            elif promoted_files and pr_res.ok:
+                # We had real changes and a valid PR draft, but git push/PR creation did not complete.
+                task.state = TaskState.FAILED
+            elif test_res.ok:
+                # No promoted files (or no-op change) and tests passed.
                 task.state = TaskState.DONE
             else:
                 task.state = TaskState.FAILED
@@ -361,8 +366,7 @@ class Orchestrator:
             if task.state == TaskState.FAILED and issue.issue_id > 0:
                 self.recent_failed_issue_ids.add(issue.issue_id)
 
-            if pr_res.ok:
-                task.state = TaskState.DONE
+            if pipeline_succeeded:
                 self.recent_failed_issue_ids.discard(issue.issue_id)
                 self.semantic_store.add_lesson(
                     {
@@ -386,7 +390,7 @@ class Orchestrator:
             )
 
             result = {
-                "ok": pr_res.ok,
+                "ok": pipeline_succeeded if promoted_files else bool(test_res.ok),
                 "issue": issue.issue_id,
                 "task_type": task.task_type.value,
                 "state": task.state.value,

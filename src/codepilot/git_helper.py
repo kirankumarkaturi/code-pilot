@@ -54,11 +54,8 @@ class GitHelper:
             self._run("checkout", default, check=False)
             self._run("pull", "origin", default, check=False)
 
-            # Delete local branch if it already exists
-            self._run("branch", "-D", branch, check=False)
-
-            # Create new branch from default
-            self._run("checkout", "-b", branch)
+            # Always (re)create branch from latest default without failing if branch already exists.
+            self._run("checkout", "-B", branch, f"origin/{default}")
 
             # Stage only the promoted files
             for f in files:
