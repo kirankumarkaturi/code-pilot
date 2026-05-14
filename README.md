@@ -36,7 +36,7 @@ traceability, and human oversight.
 - PR labels are applied after PR creation, and reviewer requests are attempted for the issue reporter.
 
 5. Memory and skills
-- Episodic memory: session event log (`.codepilot/session_log.json`).
+- Episodic memory: session event log in the CodePilot app workspace (`.codepilot/session_log.json`).
 - Semantic memory: lessons are backed by ChromaDB under `REPO_ROOT/.codepilot/semantic_chroma` with JSON backup in `lessons.json`.
 - Skills catalog mapped to task types (`bug_fix`, `feature_addition`, etc.).
 
@@ -170,15 +170,16 @@ TUI keys:
 3. Explore repo and select relevant files.
 4. Build or reuse a cached repo map, then retrieve top-K files using keyword or embedding search.
 5. Copy files into sandbox and generate edits via GPT-4o.
-5. Run tests in sandbox.
-6. If tests pass, promote files to target repo.
-7. Evaluate HITL guardrail and wait for approval when required.
-8. Create branch, commit, and push.
-9. Create draft PR through GitHub REST API.
-10. Persist session and semantic memory records.
+6. Run tests in sandbox.
+7. If tests pass, promote files to target repo.
+8. Evaluate HITL guardrail and wait for approval when required.
+9. Create branch, commit, and push.
+10. Create draft PR through GitHub REST API.
+11. Persist session and semantic memory records.
 
 ## Retrieval and Memory Notes
 
+- CodePilot keeps its own session log under the app workspace at `.codepilot/session_log.json`.
 - Repo map cache is stored under `REPO_ROOT/.codepilot/repo_map_cache.json` and invalidated via git signature changes.
 - Embedding retrieval stores its index under `REPO_ROOT/.codepilot/chroma`.
 - Semantic lesson memory stores vectorized lessons under `REPO_ROOT/.codepilot/semantic_chroma`.
