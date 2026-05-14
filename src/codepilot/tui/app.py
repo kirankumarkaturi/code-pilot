@@ -6,11 +6,30 @@ import threading
 
 from textual.app import App, ComposeResult
 from textual.containers import Container
-from textual.widgets import Footer, Header, Log, Static
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Input, Log, Static
 
 
 # ── Shared event queue that orchestrator writes to ───────────────────────────
 event_queue: queue.Queue = queue.Queue()
+command_queue: queue.Queue = queue.Queue()
+AGENT_LOG_SELECTOR = "#agent-log"
+
+
+class TaskInputScreen(Screen[str | None]):
+    def compose(self) -> ComposeResult:
+        yield Static("[b]New Task[/b]\n\nType a direct task and press Enter.\nPress Esc to cancel.")
+        yield Input(placeholder="Example: Add CSV export endpoint for reports", id="task-input")
+
+    def on_mount(self) -> None:
+        self.query_one("#task-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        value = event.value.strip()
+        self.dismiss(value or None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
 
 
 class CodePilotApp(App):
@@ -35,7 +54,13 @@ class CodePilotApp(App):
     #agent-log { overflow-y: auto; }
     """
 
-    BINDINGS = [("q", "quit", "Quit"), ("a", "approve", "Approve"), ("r", "reject", "Reject")]
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("a", "approve", "Approve"),
+        ("r", "reject", "Reject"),
+        ("i", "new_task", "New task"),
+        ("s", "skip_issue", "Skip issue"),
+    ]
 
     def __init__(self, result_holder: list | None = None, **kwargs):
         super().__init__(**kwargs)
@@ -43,6 +68,9 @@ class CodePilotApp(App):
         self._hitl_event: threading.Event = threading.Event()
         self._hitl_decision: list[bool] = [False]
         self._run_result: dict = {}
+        self._latest_issues: list[dict] = []
+        self._is_busy = False
+        self._stop_worker: threading.Event = threading.Event()
 
     # ── Layout ────────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -73,17 +101,19 @@ class CodePilotApp(App):
 
     def _handle_event(self, event: dict) -> None:
         kind = event.get("kind", "")
-        log = self.query_one("#agent-log", Log)
+        log = self.query_one(AGENT_LOG_SELECTOR, Log)
         task_panel = self.query_one("#panel-task", Static)
         issues_panel = self.query_one("#panel-issues", Static)
         hitl_panel = self.query_one("#panel-hitl", Static)
 
         if kind == "issues_fetched":
             issues = event.get("issues", [])
+            self._latest_issues = issues
             lines = "\n".join(f"  #{i['id']} {i['title']}" for i in issues) or "  No assignable issues"
             issues_panel.update(f"[b]GitHub Issues[/b]\n\n{lines}")
 
         elif kind == "task_start":
+            self._is_busy = True
             task_panel.update(
                 f"[b]Active Task[/b]\n\n"
                 f"Issue  : #{event.get('issue_id')} — {event.get('title', '')}\n"
@@ -123,6 +153,7 @@ class CodePilotApp(App):
             )
 
         elif kind == "done":
+            self._is_busy = False
             result = event.get("result", {})
             self._run_result = result
             pr_url = result.get("pr_url", "")
@@ -145,8 +176,31 @@ class CodePilotApp(App):
         self._hitl_decision[0] = False
         self._hitl_event.set()
 
+    def action_new_task(self) -> None:
+        self.push_screen(TaskInputScreen(), self._on_new_task_entered)
+
+    def _on_new_task_entered(self, value: str | None) -> None:
+        if not value:
+            return
+        command_queue.put({"kind": "new_task", "text": value})
+        self.query_one(AGENT_LOG_SELECTOR, Log).write_line(f"[ui] Queued manual task: {value}")
+
+    def action_skip_issue(self) -> None:
+        log = self.query_one(AGENT_LOG_SELECTOR, Log)
+        if self._is_busy:
+            log.write_line("[ui] Cannot skip while a task is running")
+            return
+        if not self._latest_issues:
+            log.write_line("[ui] No issue to skip")
+            return
+        issue_id = self._latest_issues[0].get("id")
+        command_queue.put({"kind": "skip_issue", "issue_id": issue_id})
+        log.write_line(f"[ui] Requested skip for issue #{issue_id}")
+
     def hitl_approver(self, pr_draft: dict) -> bool:
         """Called by orchestrator on the worker thread — blocks until user presses A/R."""
+        self._hitl_event.clear()
+        self._hitl_decision[0] = False
         event_queue.put({
             "kind": "hitl_request",
             "pr_draft": pr_draft,
@@ -157,59 +211,90 @@ class CodePilotApp(App):
 
 
 def _run_orchestrator(app: CodePilotApp) -> None:
-    """Worker thread: runs the full pipeline and emits events to the TUI queue."""
+    """Worker thread: polls GitHub, handles UI commands, and runs tasks."""
     from src.codepilot.config import settings
     from src.codepilot.orchestrator import Orchestrator
 
     orch = Orchestrator(settings)
 
-    # Emit issues
-    try:
-        issues = orch.github.fetch_open_issues()
-        event_queue.put({
-            "kind": "issues_fetched",
-            "issues": [{"id": i.issue_id, "title": i.title} for i in issues],
-        })
-    except Exception:
-        issues = []
-
-    if not issues:
-        event_queue.put({"kind": "log", "agent": "orchestrator", "message": "No assignable issues found"})
-        event_queue.put({"kind": "done", "result": {"state": "IDLE"}})
-        return
-
-    issue = issues[0]
-    event_queue.put({"kind": "task_start", "issue_id": issue.issue_id, "title": issue.title, "task_type": ""})
-
     def emit(msg: str, agent: str = "orchestrator") -> None:
         event_queue.put({"kind": "log", "agent": agent, "message": msg})
 
-    emit(f"Fetched issue #{issue.issue_id}: {issue.title}")
+    pending_manual_tasks: list[str] = []
+    idle_notice_shown = False
 
-    result = orch.run_once(hitl_approver=app.hitl_approver)
+    while not app._stop_worker.is_set():
+        while True:
+            try:
+                cmd = command_queue.get_nowait()
+            except queue.Empty:
+                break
 
-    task_type = result.get("task_type", "")
-    state = result.get("state", "")
-    event_queue.put({
-        "kind": "task_state",
-        "issue_id": issue.issue_id,
-        "title": issue.title,
-        "task_type": task_type,
-        "state": state,
-        "files": result.get("promoted_files", []),
-    })
+            if cmd.get("kind") == "new_task":
+                task_text = (cmd.get("text") or "").strip()
+                if task_text:
+                    pending_manual_tasks.append(task_text)
+            elif cmd.get("kind") == "skip_issue":
+                issue_id = cmd.get("issue_id")
+                if isinstance(issue_id, int):
+                    orch.skip_issue(issue_id)
+                    emit(f"Skipping issue #{issue_id} for this session")
 
-    for entry in result.get("log", []):
-        emit(entry)
+        try:
+            issues = orch.fetch_processable_issues()
+            event_queue.put({
+                "kind": "issues_fetched",
+                "issues": [{"id": i.issue_id, "title": i.title} for i in issues],
+            })
+        except Exception as exc:
+            emit(f"Issue fetch failed: {exc}")
+            issues = []
 
-    if result.get("hitl_required"):
+        issue = None
+        if pending_manual_tasks:
+            task_text = pending_manual_tasks.pop(0)
+            issue = orch.build_manual_issue(task_text)
+            emit(f"Starting manual task: {task_text}", agent="ui")
+        elif issues:
+            issue = issues[0]
+            emit(f"Fetched issue #{issue.issue_id}: {issue.title}")
+
+        if issue is None:
+            if not idle_notice_shown:
+                emit("No assignable issues found; waiting for next poll or manual task")
+                idle_notice_shown = True
+
+            if app._stop_worker.wait(timeout=max(1, int(settings.poll_interval_seconds))):
+                break
+            continue
+
+        idle_notice_shown = False
+        event_queue.put({"kind": "task_start", "issue_id": issue.issue_id, "title": issue.title, "task_type": ""})
+
+        result = orch.run_issue(issue, hitl_approver=app.hitl_approver)
+
+        task_type = result.get("task_type", "")
+        state = result.get("state", "")
         event_queue.put({
-            "kind": "hitl_resolved",
-            "approved": result.get("hitl_approved", False),
-            "pr_url": result.get("pr_url", ""),
+            "kind": "task_state",
+            "issue_id": issue.issue_id,
+            "title": issue.title,
+            "task_type": task_type,
+            "state": state,
+            "files": result.get("promoted_files", []),
         })
 
-    event_queue.put({"kind": "done", "result": result})
+        for entry in result.get("log", []):
+            emit(entry)
+
+        if result.get("hitl_required"):
+            event_queue.put({
+                "kind": "hitl_resolved",
+                "approved": result.get("hitl_approved", False),
+                "pr_url": result.get("pr_url", ""),
+            })
+
+        event_queue.put({"kind": "done", "result": result})
 
 
 def main() -> None:
@@ -217,7 +302,10 @@ def main() -> None:
     # Start orchestrator in background thread
     worker = threading.Thread(target=_run_orchestrator, args=(app,), daemon=True)
     worker.start()
-    app.run()
+    try:
+        app.run()
+    finally:
+        app._stop_worker.set()
 
 
 if __name__ == "__main__":
