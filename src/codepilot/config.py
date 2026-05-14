@@ -28,6 +28,7 @@ class Settings:
     max_complexity: int = int(os.getenv("MAX_COMPLEXITY", "6"))
     repo_map_token_budget: int = int(os.getenv("REPO_MAP_TOKEN_BUDGET", "4000"))
     repo_map_top_k: int = int(os.getenv("REPO_MAP_TOP_K", "10"))
+    repo_retrieval_strategy: str = os.getenv("REPO_RETRIEVAL_STRATEGY", "keyword")
     use_dry_run: bool = os.getenv("USE_DRY_RUN", "true").lower() == "true"
 
     @property

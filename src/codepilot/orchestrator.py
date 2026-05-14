@@ -46,6 +46,7 @@ class Orchestrator:
         self.repo_explorer = RepoExplorerAgent(
             token_budget=settings.repo_map_token_budget,
             top_k=settings.repo_map_top_k,
+            retrieval_strategy=settings.repo_retrieval_strategy,
         )
         self.coder = CoderAgent(
             azure_endpoint=settings.azure_openai_endpoint,

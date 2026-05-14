@@ -83,6 +83,117 @@ def _write_cached_map(repo_root: Path, signature: str, token_budget: int, items:
     _cache_path(repo_root).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> list[str]:
+    content = (text or "").strip()
+    if not content:
+        return []
+    chunks: list[str] = []
+    start = 0
+    while start < len(content):
+        end = min(len(content), start + chunk_size)
+        chunk = content[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        if end >= len(content):
+            break
+        start = max(0, end - overlap)
+    return chunks
+
+
+def _embedding_signature_path(repo_root: Path) -> Path:
+    cache_dir = repo_root / ".codepilot"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir / "embedding_signature.txt"
+
+
+def _retrieve_embedding_files(task_text: str, repo_map: list[dict[str, str]], repo_root: str, k: int, signature: str) -> list[str]:
+    root = Path(repo_root)
+
+    try:
+        import chromadb
+    except Exception:
+        return []
+
+    db_path = root / ".codepilot" / "chroma"
+    db_path.mkdir(parents=True, exist_ok=True)
+    collection_name = "repo_chunks"
+
+    try:
+        client = chromadb.PersistentClient(path=str(db_path))
+    except Exception:
+        return []
+
+    signature_path = _embedding_signature_path(root)
+    cached_signature = ""
+    if signature_path.exists():
+        try:
+            cached_signature = signature_path.read_text(encoding="utf-8")
+        except Exception:
+            cached_signature = ""
+
+    try:
+        if cached_signature != signature:
+            try:
+                client.delete_collection(collection_name)
+            except Exception:
+                pass
+
+        collection = client.get_or_create_collection(name=collection_name)
+
+        if cached_signature != signature:
+            docs: list[str] = []
+            ids: list[str] = []
+            metadatas: list[dict[str, str]] = []
+
+            doc_id = 0
+            for item in repo_map:
+                rel = item.get("path", "")
+                if not rel:
+                    continue
+                path = root / rel
+                try:
+                    text = path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+
+                chunks = _chunk_text(text)
+                for idx, chunk in enumerate(chunks):
+                    docs.append(chunk)
+                    ids.append(f"doc-{doc_id}-{idx}")
+                    metadatas.append({"path": rel})
+                doc_id += 1
+
+            if docs:
+                collection.add(documents=docs, ids=ids, metadatas=metadatas)
+            signature_path.write_text(signature, encoding="utf-8")
+
+        if collection.count() == 0:
+            return []
+
+        result = collection.query(query_texts=[task_text], n_results=max(k * 3, 10))
+    except Exception:
+        return []
+
+    metadatas = result.get("metadatas") if isinstance(result, dict) else None
+    if not metadatas:
+        return []
+
+    ranked_paths: list[str] = []
+    seen: set[str] = set()
+    first_batch = metadatas[0] if metadatas else []
+    for meta in first_batch:
+        if not isinstance(meta, dict):
+            continue
+        path = str(meta.get("path", ""))
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        ranked_paths.append(path)
+        if len(ranked_paths) >= k:
+            break
+    return ranked_paths
+
+
 def _iter_exported_symbols(lines: Iterable[str], suffix: str) -> list[str]:
     symbols: list[str] = []
     for raw in lines:
@@ -159,7 +270,7 @@ def build_repo_map(repo_root: str, token_budget: int = 4000) -> list[dict[str, s
     return items
 
 
-def retrieve_relevant_files(task_text: str, repo_map: list[dict[str, str]], k: int = 10) -> list[str]:
+def _retrieve_keyword_files(task_text: str, repo_map: list[dict[str, str]], k: int = 10) -> list[str]:
     keywords = {w.lower() for w in task_text.split() if len(w) > 2}
     scored: list[tuple[int, str]] = []
     for item in repo_map:
@@ -168,3 +279,19 @@ def retrieve_relevant_files(task_text: str, repo_map: list[dict[str, str]], k: i
         scored.append((score, item["path"]))
     scored.sort(reverse=True)
     return [p for s, p in scored if s > 0][:k]
+
+
+def retrieve_relevant_files(
+    task_text: str,
+    repo_map: list[dict[str, str]],
+    k: int = 10,
+    strategy: str = "keyword",
+    repo_root: str = ".",
+) -> list[str]:
+    chosen = (strategy or "keyword").strip().lower()
+    if chosen == "embedding":
+        signature = _git_signature(Path(repo_root))
+        embedded = _retrieve_embedding_files(task_text, repo_map, repo_root, k, signature)
+        if embedded:
+            return embedded
+    return _retrieve_keyword_files(task_text, repo_map, k)
