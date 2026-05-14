@@ -107,7 +107,12 @@ class Orchestrator:
 
         issue = issues[0]
         task_type = self.classify_task(issue)
-        task = TaskContext(issue=issue, task_type=task_type, todos=self.build_todos(task_type))
+        todo_list = self.build_todos(task_type)
+        task = TaskContext(
+            issue=issue,
+            task_type=task_type,
+            todos=todo_list,
+        )
 
         task.state = TaskState.EXPLORING
         explore_res = self.repo_explorer.run(self.settings.repo_root, f"{issue.title} {issue.body}")
