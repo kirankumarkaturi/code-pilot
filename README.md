@@ -194,7 +194,7 @@ TUI keys:
 ## Submission Artifacts To Add Before Final Submission
 
 - TUI demo GIF: [artifacts/kiran-assignment.gif](artifacts/kiran-assignment.gif)
-- Add a link or screenshot for at least one generated PR example.
+- PR evidence: https://github.com/kirankumarkaturi/kiran-lab2/pull/4
 - Record the required 5-7 minute demo video.
 - Rename or mirror the public repository to `codepilot-agent` if your evaluator requires the exact repo name from the assignment.
 
