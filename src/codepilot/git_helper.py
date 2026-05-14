@@ -45,17 +45,14 @@ class GitHelper:
         Returns (success, message).
         """
         try:
-            default = self.default_branch()
-
             # Fetch latest
             self._run("fetch", "origin", check=False)
 
-            # Switch back to default branch first (in case we're on an old codepilot branch)
-            self._run("checkout", default, check=False)
-            self._run("pull", "origin", default, check=False)
-
-            # Always (re)create branch from latest default without failing if branch already exists.
-            self._run("checkout", "-B", branch, f"origin/{default}")
+            # Keep local promoted changes intact and create/reset branch from current HEAD.
+            # Using origin/<default> here can fail when working tree contains local edits.
+            checkout = self._run("checkout", "-B", branch, check=False)
+            if checkout.returncode != 0:
+                return False, f"Checkout failed: {checkout.stderr.strip()}"
 
             # Stage only the promoted files
             for f in files:
