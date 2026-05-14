@@ -47,6 +47,7 @@ class Orchestrator:
             token_budget=settings.repo_map_token_budget,
             top_k=settings.repo_map_top_k,
             retrieval_strategy=settings.repo_retrieval_strategy,
+            embedding_model_name=settings.embedding_model_name,
         )
         self.coder = CoderAgent(
             azure_endpoint=settings.azure_openai_endpoint,

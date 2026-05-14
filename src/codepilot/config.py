@@ -29,6 +29,7 @@ class Settings:
     repo_map_token_budget: int = int(os.getenv("REPO_MAP_TOKEN_BUDGET", "4000"))
     repo_map_top_k: int = int(os.getenv("REPO_MAP_TOP_K", "10"))
     repo_retrieval_strategy: str = os.getenv("REPO_RETRIEVAL_STRATEGY", "keyword")
+    embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
     use_dry_run: bool = os.getenv("USE_DRY_RUN", "true").lower() == "true"
 
     @property

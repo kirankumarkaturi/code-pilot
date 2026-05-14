@@ -112,8 +112,13 @@ def _retrieve_embedding_files(
     repo_root: str,
     k: int,
     signature: str,
+    embedding_model_name: str,
 ) -> tuple[list[str], str]:
     root = Path(repo_root)
+
+    model_name = (embedding_model_name or "all-MiniLM-L6-v2").strip()
+    if model_name != "all-MiniLM-L6-v2":
+        return [], f"embedding_unavailable:model_not_supported:{model_name}"
 
     try:
         import chromadb
@@ -122,7 +127,7 @@ def _retrieve_embedding_files(
 
     db_path = root / ".codepilot" / "chroma"
     db_path.mkdir(parents=True, exist_ok=True)
-    collection_name = "repo_chunks"
+    collection_name = "repo_chunks_all_minilm_l6_v2"
 
     try:
         client = chromadb.PersistentClient(path=str(db_path))
@@ -199,7 +204,7 @@ def _retrieve_embedding_files(
             break
     if not ranked_paths:
         return [], "embedding_empty:paths"
-    return ranked_paths, "embedding"
+    return ranked_paths, f"embedding:{model_name}"
 
 
 def _iter_exported_symbols(lines: Iterable[str], suffix: str) -> list[str]:
@@ -295,11 +300,19 @@ def retrieve_relevant_files(
     k: int = 10,
     strategy: str = "keyword",
     repo_root: str = ".",
+    embedding_model_name: str = "all-MiniLM-L6-v2",
 ) -> tuple[list[str], str]:
     chosen = (strategy or "keyword").strip().lower()
     if chosen == "embedding":
         signature = _git_signature(Path(repo_root))
-        embedded, mode = _retrieve_embedding_files(task_text, repo_map, repo_root, k, signature)
+        embedded, mode = _retrieve_embedding_files(
+            task_text,
+            repo_map,
+            repo_root,
+            k,
+            signature,
+            embedding_model_name,
+        )
         if embedded:
             return embedded, mode
         keyword_files = _retrieve_keyword_files(task_text, repo_map, k)
