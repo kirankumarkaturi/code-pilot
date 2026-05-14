@@ -190,7 +190,9 @@ class Orchestrator:
             task.state = TaskState.EXPLORING
             explore_res = self.repo_explorer.run(self.settings.repo_root, f"{issue.title} {issue.body}")
             task.relevant_files = explore_res.payload.get("relevant_files", [])
+            retrieval_mode = str(explore_res.payload.get("retrieval_mode", "unknown"))
             task.decision_log.append(explore_res.message)
+            task.decision_log.append(f"Repo retrieval mode: {retrieval_mode}")
 
             task.state = TaskState.IMPLEMENTING
             lessons_used, lessons_context = self._build_lessons_context(issue, task_type)
@@ -373,6 +375,7 @@ class Orchestrator:
                 "task_type": task.task_type.value,
                 "state": task.state.value,
                 "relevant_files": task.relevant_files,
+                "retrieval_mode": retrieval_mode,
                 "promoted_files": promoted_files,
                 "diff_preview": task.current_diff_path,
                 "fix_source": code_res.payload.get("fix_source", "none"),

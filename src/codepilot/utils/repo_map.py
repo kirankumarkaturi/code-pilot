@@ -106,13 +106,19 @@ def _embedding_signature_path(repo_root: Path) -> Path:
     return cache_dir / "embedding_signature.txt"
 
 
-def _retrieve_embedding_files(task_text: str, repo_map: list[dict[str, str]], repo_root: str, k: int, signature: str) -> list[str]:
+def _retrieve_embedding_files(
+    task_text: str,
+    repo_map: list[dict[str, str]],
+    repo_root: str,
+    k: int,
+    signature: str,
+) -> tuple[list[str], str]:
     root = Path(repo_root)
 
     try:
         import chromadb
     except Exception:
-        return []
+        return [], "embedding_unavailable:chromadb_import"
 
     db_path = root / ".codepilot" / "chroma"
     db_path.mkdir(parents=True, exist_ok=True)
@@ -121,7 +127,7 @@ def _retrieve_embedding_files(task_text: str, repo_map: list[dict[str, str]], re
     try:
         client = chromadb.PersistentClient(path=str(db_path))
     except Exception:
-        return []
+        return [], "embedding_unavailable:chroma_client"
 
     signature_path = _embedding_signature_path(root)
     cached_signature = ""
@@ -168,15 +174,15 @@ def _retrieve_embedding_files(task_text: str, repo_map: list[dict[str, str]], re
             signature_path.write_text(signature, encoding="utf-8")
 
         if collection.count() == 0:
-            return []
+            return [], "embedding_empty:index"
 
         result = collection.query(query_texts=[task_text], n_results=max(k * 3, 10))
     except Exception:
-        return []
+        return [], "embedding_error:query"
 
     metadatas = result.get("metadatas") if isinstance(result, dict) else None
     if not metadatas:
-        return []
+        return [], "embedding_empty:results"
 
     ranked_paths: list[str] = []
     seen: set[str] = set()
@@ -191,7 +197,9 @@ def _retrieve_embedding_files(task_text: str, repo_map: list[dict[str, str]], re
         ranked_paths.append(path)
         if len(ranked_paths) >= k:
             break
-    return ranked_paths
+    if not ranked_paths:
+        return [], "embedding_empty:paths"
+    return ranked_paths, "embedding"
 
 
 def _iter_exported_symbols(lines: Iterable[str], suffix: str) -> list[str]:
@@ -287,11 +295,19 @@ def retrieve_relevant_files(
     k: int = 10,
     strategy: str = "keyword",
     repo_root: str = ".",
-) -> list[str]:
+) -> tuple[list[str], str]:
     chosen = (strategy or "keyword").strip().lower()
     if chosen == "embedding":
         signature = _git_signature(Path(repo_root))
-        embedded = _retrieve_embedding_files(task_text, repo_map, repo_root, k, signature)
+        embedded, mode = _retrieve_embedding_files(task_text, repo_map, repo_root, k, signature)
         if embedded:
-            return embedded
-    return _retrieve_keyword_files(task_text, repo_map, k)
+            return embedded, mode
+        keyword_files = _retrieve_keyword_files(task_text, repo_map, k)
+        if keyword_files:
+            return keyword_files, f"{mode}->keyword"
+        return [], f"{mode}->keyword_empty"
+
+    keyword_files = _retrieve_keyword_files(task_text, repo_map, k)
+    if keyword_files:
+        return keyword_files, "keyword"
+    return [], "keyword_empty"

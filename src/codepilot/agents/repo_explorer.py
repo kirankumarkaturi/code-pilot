@@ -12,7 +12,7 @@ class RepoExplorerAgent:
 
     def run(self, repo_root: str, task_text: str) -> AgentResult:
         repo_map = build_repo_map(repo_root, token_budget=self.token_budget)
-        relevant = retrieve_relevant_files(
+        relevant, retrieval_mode = retrieve_relevant_files(
             task_text,
             repo_map,
             k=self.top_k,
@@ -22,8 +22,13 @@ class RepoExplorerAgent:
         if not relevant:
             # Fallback to top files for empty or tiny repositories.
             relevant = [item["path"] for item in repo_map[: self.top_k]]
+            retrieval_mode = f"{retrieval_mode}+topk_fallback"
         return AgentResult(
             ok=True,
-            message="Repo map built",
-            payload={"repo_map": repo_map, "relevant_files": relevant},
+            message=f"Repo map built (retrieval={retrieval_mode})",
+            payload={
+                "repo_map": repo_map,
+                "relevant_files": relevant,
+                "retrieval_mode": retrieval_mode,
+            },
         )
