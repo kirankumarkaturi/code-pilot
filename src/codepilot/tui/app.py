@@ -40,7 +40,7 @@ class CodePilotApp(App):
         height: 1fr;
         layout: grid;
         grid-size: 2 2;
-        grid-columns: 1fr 2fr;
+        grid-columns: 1fr 1fr;
         grid-rows: 1fr 1fr;
         grid-gutter: 1;
         padding: 1;
