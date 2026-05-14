@@ -59,7 +59,10 @@ class Orchestrator:
         self.pr_agent = PRAgent()
         self.git_helper = GitHelper(settings.repo_root)
         self.session_store = SessionStore()
-        self.semantic_store = SemanticStore()
+        self.semantic_store = SemanticStore(
+            repo_root=settings.repo_root,
+            embedding_model_name=settings.embedding_model_name,
+        )
         self.in_progress_issue_ids: set[int] = set()
         self.skipped_issue_ids: set[int] = set()
         self._manual_issue_seq = 0
