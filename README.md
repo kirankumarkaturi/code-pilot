@@ -33,14 +33,16 @@ traceability, and human oversight.
 4. Real DevOps automation
 - Real git branch/commit/push on target repo via `GitHelper`.
 - Real GitHub draft PR creation via REST API (`GitHubClient.create_pull_request`).
+- PR labels are applied after PR creation, and reviewer requests are attempted for the issue reporter.
 
 5. Memory and skills
 - Episodic memory: session event log (`.codepilot/session_log.json`).
-- Semantic memory: lessons store (`.codepilot/lessons.json`).
+- Semantic memory: lessons are backed by ChromaDB under `REPO_ROOT/.codepilot/semantic_chroma` with JSON backup in `lessons.json`.
 - Skills catalog mapped to task types (`bug_fix`, `feature_addition`, etc.).
 
 6. Operator UI
 - Textual 4-panel TUI with live event updates.
+- Manual task entry (`I`), skip issue (`S`), and HITL inspect view (`L`).
 - CLI mode for straightforward JSON output.
 
 ## Verified End-to-End Result
@@ -126,6 +128,10 @@ POLL_INTERVAL_SECONDS=300
 REPO_ROOT=C:/path/to/target-repo
 SANDBOX_ROOT=./sandbox
 MAX_COMPLEXITY=6
+REPO_MAP_TOKEN_BUDGET=4000
+REPO_MAP_TOP_K=10
+REPO_RETRIEVAL_STRATEGY=keyword
+EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
 USE_DRY_RUN=false
 ```
 
@@ -152,6 +158,9 @@ python -m src.codepilot.tui.app
 TUI keys:
 - `A` approve HITL request
 - `R` reject HITL request
+- `L` inspect pending PR draft in the approval panel
+- `I` create a manual task not tied to GitHub
+- `S` skip the current top issue for this session
 - `Q` quit UI
 
 ## Pipeline Walkthrough
@@ -159,7 +168,8 @@ TUI keys:
 1. Fetch assignable open issue from GitHub.
 2. Classify issue type (LLM with fallback).
 3. Explore repo and select relevant files.
-4. Copy files into sandbox and generate edits via GPT-4o.
+4. Build or reuse a cached repo map, then retrieve top-K files using keyword or embedding search.
+5. Copy files into sandbox and generate edits via GPT-4o.
 5. Run tests in sandbox.
 6. If tests pass, promote files to target repo.
 7. Evaluate HITL guardrail and wait for approval when required.
@@ -167,11 +177,25 @@ TUI keys:
 9. Create draft PR through GitHub REST API.
 10. Persist session and semantic memory records.
 
+## Retrieval and Memory Notes
+
+- Repo map cache is stored under `REPO_ROOT/.codepilot/repo_map_cache.json` and invalidated via git signature changes.
+- Embedding retrieval stores its index under `REPO_ROOT/.codepilot/chroma`.
+- Semantic lesson memory stores vectorized lessons under `REPO_ROOT/.codepilot/semantic_chroma`.
+- Retrieval mode is surfaced at runtime as `keyword`, `embedding:all-MiniLM-L6-v2`, or explicit fallback reasons.
+
 ## Notes and Limitations
 
-- Embedding-based semantic retrieval is currently keyword-first for speed and simplicity.
-- PR labels are prepared in draft metadata; label API calls can be added as an extension.
+- DeepAgents and LangGraph toolkit abstractions are represented here by equivalent custom orchestration and storage code.
+- Only `all-MiniLM-L6-v2` is currently supported as an explicit local embedding model name.
 - Pydantic warning lines from LangChain structured output are non-blocking and do not affect results.
+
+## Submission Artifacts To Add Before Final Submission
+
+- Add a GIF or screen recording of the TUI in action.
+- Add a link or screenshot for at least one generated PR example.
+- Record the required 5-7 minute demo video.
+- Rename or mirror the public repository to `codepilot-agent` if your evaluator requires the exact repo name from the assignment.
 
 ## Submission Checklist
 

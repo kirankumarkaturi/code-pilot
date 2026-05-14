@@ -58,6 +58,7 @@ class CodePilotApp(App):
         ("q", "quit", "Quit"),
         ("a", "approve", "Approve"),
         ("r", "reject", "Reject"),
+        ("l", "inspect", "Inspect"),
         ("i", "new_task", "New task"),
         ("s", "skip_issue", "Skip issue"),
     ]
@@ -71,6 +72,8 @@ class CodePilotApp(App):
         self._latest_issues: list[dict] = []
         self._is_busy = False
         self._stop_worker: threading.Event = threading.Event()
+        self._pending_pr_draft: dict = {}
+        self._pending_hitl_files: list[str] = []
 
     # ── Layout ────────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -135,17 +138,21 @@ class CodePilotApp(App):
 
         elif kind == "hitl_request":
             pr = event.get("pr_draft", {})
+            self._pending_pr_draft = pr
+            self._pending_hitl_files = event.get("files", [])
             hitl_panel.update(
                 f"[b]Human Approval[/b]\n\n"
                 f"[yellow]AWAITING YOUR DECISION[/yellow]\n\n"
                 f"Branch : {pr.get('branch', '')}\n"
                 f"Title  : {pr.get('title', '')}\n"
                 f"Files  : {', '.join(event.get('files', []))}\n\n"
-                f"[b]Press A to approve, R to reject[/b]"
+                f"[b]Press A to approve, R to reject, L to inspect[/b]"
             )
 
         elif kind == "hitl_resolved":
             decision = event.get("approved", False)
+            self._pending_pr_draft = {}
+            self._pending_hitl_files = []
             hitl_panel.update(
                 f"[b]Human Approval[/b]\n\n"
                 f"{'[green]APPROVED[/green]' if decision else '[red]REJECTED[/red]'}\n\n"
@@ -175,6 +182,28 @@ class CodePilotApp(App):
     def action_reject(self) -> None:
         self._hitl_decision[0] = False
         self._hitl_event.set()
+
+    def action_inspect(self) -> None:
+        hitl_panel = self.query_one("#panel-hitl", Static)
+        if not self._pending_pr_draft:
+            self.query_one(AGENT_LOG_SELECTOR, Log).write_line("[ui] No pending approval item to inspect")
+            return
+
+        pr = self._pending_pr_draft
+        body = str(pr.get("body", "")).strip()
+        if len(body) > 500:
+            body = body[:500].rstrip() + "..."
+        reviewers = pr.get("reviewers", []) or []
+        hitl_panel.update(
+            f"[b]Human Approval - Inspect[/b]\n\n"
+            f"Branch    : {pr.get('branch', '')}\n"
+            f"Title     : {pr.get('title', '')}\n"
+            f"Labels    : {', '.join(pr.get('labels', [])) or 'none'}\n"
+            f"Reviewers : {', '.join(reviewers) or 'none'}\n"
+            f"Files     : {', '.join(self._pending_hitl_files) or 'none'}\n\n"
+            f"Body Preview:\n{body or 'none'}\n\n"
+            f"[b]Press A to approve, R to reject[/b]"
+        )
 
     def action_new_task(self) -> None:
         self.push_screen(TaskInputScreen(), self._on_new_task_entered)
