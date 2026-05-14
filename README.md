@@ -191,12 +191,13 @@ TUI keys:
 - Only `all-MiniLM-L6-v2` is currently supported as an explicit local embedding model name.
 - Pydantic warning lines from LangChain structured output are non-blocking and do not affect results.
 
-## Submission Artifacts To Add Before Final Submission
+## Submission Artifacts
 
+- CodePilot repository: https://github.com/kirankumarkaturi/codepilot-agent
 - TUI demo GIF: [artifacts/kiran-assignment.gif](artifacts/kiran-assignment.gif)
-- PR evidence: https://github.com/kirankumarkaturi/kiran-lab2/pull/4
-- Record the required 5-7 minute demo video.
-- Rename or mirror the public repository to `codepilot-agent` if your evaluator requires the exact repo name from the assignment.
+- PR evidence: [CodePilot PR #4](https://github.com/kirankumarkaturi/kiran-lab2/pull/4)
+- Full demo video (5-7 min): [https://youtu.be/ZbBp0THdwC0](https://youtu.be/ZbBp0THdwC0)
+
 
 ## Submission Checklist
 
